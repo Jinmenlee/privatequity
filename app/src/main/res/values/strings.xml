@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">Private Equity</string>
+    <string name="empty">Empty Content</string>
+    <string name="btn1">Call</string>
+    <string name="btn2">Locate</string>
+    <string name="btn3">Sms</string>
+    <string name="btn4">Gmail</string>
+</resources>
