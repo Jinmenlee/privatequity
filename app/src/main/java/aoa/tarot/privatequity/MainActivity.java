@@ -1,8 +1,11 @@
 package aoa.tarot.privatequity;
 
 import android.Manifest;
+import android.accounts.AccountManager;
 import android.app.Activity;
+import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.location.Address;
@@ -23,12 +26,22 @@ import android.widget.TextView;
 import com.google.android.gms.location.FusedLocationProviderClient;
 import com.google.android.gms.location.LocationServices;
 import com.google.android.gms.tasks.OnSuccessListener;
+import com.google.api.client.googleapis.extensions.android.gms.auth.GoogleAccountCredential;
+import com.google.api.client.googleapis.javanet.GoogleNetHttpTransport;
+import com.google.api.client.http.HttpTransport;
+import com.google.api.client.json.JsonFactory;
+import com.google.api.client.json.jackson2.JacksonFactory;
+import com.google.api.services.tasks.TasksScopes;
 
 import java.io.IOException;
+import java.security.GeneralSecurityException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+
+import aoa.tarot.privatequity.tasks.AsyncLoadTasks;
 
 public class MainActivity extends Activity {
 
@@ -80,9 +93,32 @@ public class MainActivity extends Activity {
         btnGmail.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-
+                try {
+                    log.setText(getGmail());
+                } catch (GeneralSecurityException e) {
+                    e.printStackTrace();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
             }
         });
+    }
+
+    private static final String PREF_ACCOUNT_NAME = "itri.n300.privatequity";
+    GoogleAccountCredential credential;
+
+    private String getGmail() throws GeneralSecurityException, IOException {
+        HttpTransport httpTransport = GoogleNetHttpTransport.newTrustedTransport();
+        JsonFactory jsonFactory = JacksonFactory.getDefaultInstance();
+
+        credential =
+                GoogleAccountCredential.usingOAuth2(this, Collections.singleton(TasksScopes.TASKS));
+        SharedPreferences settings = getPreferences(Context.MODE_PRIVATE);
+        credential.setSelectedAccountName(settings.getString(PREF_ACCOUNT_NAME, null));
+        com.google.api.services.tasks.Tasks service =
+                new com.google.api.services.tasks.Tasks.Builder(httpTransport, jsonFactory, credential)
+                        .setApplicationName("Google-TasksAndroidSample/1.0").build();
+
     }
 
     private FusedLocationProviderClient mFusedLocationClient;
@@ -286,6 +322,10 @@ public class MainActivity extends Activity {
         return sb.toString();
     }
 
+    private static final int REQUEST_ACCOUNT_PICKER = 10070;
+    private static final int REQUEST_GOOGLE_PLAY_SERVICES = 10080;
+    private static final int REQUEST_AUTHORIZATION = 10090;
+
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         if (requestCode == 1) {
@@ -300,8 +340,42 @@ public class MainActivity extends Activity {
                 }
             }
         }
+        super.onActivityResult(requestCode, resultCode, data);
+        switch (requestCode) {
+            case REQUEST_GOOGLE_PLAY_SERVICES:
+                if (resultCode == Activity.RESULT_OK) {
+                    haveGooglePlayServices();
+                } else {
+                    checkGooglePlayServicesAvailable();
+                }
+                break;
+            case REQUEST_AUTHORIZATION:
+                if (resultCode == Activity.RESULT_OK) {
+                    AsyncLoadTasks.run(this);
+                } else {
+                    chooseAccount();
+                }
+                break;
+            case REQUEST_ACCOUNT_PICKER:
+                if (resultCode == Activity.RESULT_OK && data != null && data.getExtras() != null) {
+                    String accountName = data.getExtras().getString(AccountManager.KEY_ACCOUNT_NAME);
+                    if (accountName != null) {
+                        credential.setSelectedAccountName(accountName);
+                        SharedPreferences settings = getPreferences(Context.MODE_PRIVATE);
+                        SharedPreferences.Editor editor = settings.edit();
+                        editor.putString(PREF_ACCOUNT_NAME, accountName);
+                        editor.commit();
+                        AsyncLoadTasks.run(this);
+                    }
+                }
+                break;
+        }
+
     }
 
+    private void chooseAccount() {
+        startActivityForResult(credential.newChooseAccountIntent(), REQUEST_ACCOUNT_PICKER);
+    }
 
     public List<Sms> getAllSms() {
         List<Sms> lstSms = new ArrayList<>();
