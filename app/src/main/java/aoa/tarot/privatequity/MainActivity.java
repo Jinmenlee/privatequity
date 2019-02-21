@@ -2,19 +2,23 @@ package aoa.tarot.privatequity;
 
 import android.Manifest;
 import android.accounts.AccountManager;
+import android.accounts.AccountManagerCallback;
+import android.accounts.AccountManagerFuture;
+import android.accounts.AuthenticatorException;
+import android.accounts.OperationCanceledException;
 import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.location.Address;
 import android.location.Geocoder;
 import android.location.Location;
 import android.net.Uri;
-import android.os.Build;
+import android.os.AsyncTask;
 import android.provider.CallLog;
-import android.provider.Telephony;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.ContextCompat;
 import android.os.Bundle;
@@ -26,14 +30,28 @@ import android.widget.TextView;
 import com.google.android.gms.location.FusedLocationProviderClient;
 import com.google.android.gms.location.LocationServices;
 import com.google.android.gms.tasks.OnSuccessListener;
+import com.google.api.client.auth.oauth2.Credential;
+import com.google.api.client.extensions.java6.auth.oauth2.AuthorizationCodeInstalledApp;
+import com.google.api.client.extensions.jetty.auth.oauth2.LocalServerReceiver;
+import com.google.api.client.googleapis.auth.oauth2.GoogleAuthorizationCodeFlow;
+import com.google.api.client.googleapis.auth.oauth2.GoogleClientSecrets;
 import com.google.api.client.googleapis.extensions.android.gms.auth.GoogleAccountCredential;
 import com.google.api.client.googleapis.javanet.GoogleNetHttpTransport;
 import com.google.api.client.http.HttpTransport;
+import com.google.api.client.http.javanet.NetHttpTransport;
 import com.google.api.client.json.JsonFactory;
 import com.google.api.client.json.jackson2.JacksonFactory;
+import com.google.api.client.util.store.FileDataStoreFactory;
+import com.google.api.services.gmail.Gmail;
+import com.google.api.services.gmail.GmailScopes;
+import com.google.api.services.gmail.model.Label;
+import com.google.api.services.gmail.model.ListLabelsResponse;
 import com.google.api.services.tasks.TasksScopes;
+import com.google.api.services.tasks.model.Task;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.security.GeneralSecurityException;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -43,8 +61,10 @@ import java.util.Locale;
 
 import aoa.tarot.privatequity.tasks.AsyncLoadTasks;
 
+
 public class MainActivity extends Activity {
 
+    private final String TAG = "MainActivity";
     int MY_PERMISSIONS_REQUEST_READ_CALL_LOG = 1023;
     int MY_PERMISSIONS_REQUEST_ACCESS_COARSE_LOCATION = 1024;
     int MY_PERMISSIONS_REQUEST_READ_SMS = 1025;
@@ -95,31 +115,24 @@ public class MainActivity extends Activity {
             public void onClick(View view) {
                 try {
                     log.setText(getGmail());
-                } catch (GeneralSecurityException e) {
-                    e.printStackTrace();
                 } catch (IOException e) {
-                    e.printStackTrace();
+                    log.setText(e.toString());
                 }
+//                try {
+//                    log.setText(getGmail2());
+//                } catch (IOException e) {
+//                    log.setText(e.toString());
+//                } catch (GeneralSecurityException e) {
+//                    log.setText(e.toString());
+//                }
             }
         });
     }
 
-    private static final String PREF_ACCOUNT_NAME = "itri.n300.privatequity";
+    private static final String PREF_ACCOUNT_NAME = "n300.itri@gmail.com";
     GoogleAccountCredential credential;
-
-    private String getGmail() throws GeneralSecurityException, IOException {
-        HttpTransport httpTransport = GoogleNetHttpTransport.newTrustedTransport();
-        JsonFactory jsonFactory = JacksonFactory.getDefaultInstance();
-
-        credential =
-                GoogleAccountCredential.usingOAuth2(this, Collections.singleton(TasksScopes.TASKS));
-        SharedPreferences settings = getPreferences(Context.MODE_PRIVATE);
-        credential.setSelectedAccountName(settings.getString(PREF_ACCOUNT_NAME, null));
-        com.google.api.services.tasks.Tasks service =
-                new com.google.api.services.tasks.Tasks.Builder(httpTransport, jsonFactory, credential)
-                        .setApplicationName("Google-TasksAndroidSample/1.0").build();
-
-    }
+    com.google.api.services.tasks.Tasks service;
+    Gmail gmail;
 
     private FusedLocationProviderClient mFusedLocationClient;
     private String locate = "";
@@ -326,36 +339,182 @@ public class MainActivity extends Activity {
     private static final int REQUEST_GOOGLE_PLAY_SERVICES = 10080;
     private static final int REQUEST_AUTHORIZATION = 10090;
 
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        if (requestCode == 1) {
-            if (resultCode == RESULT_OK) {
+    private static final String APPLICATION_NAME = "Gmail API Java Quickstart";
+    private static final JsonFactory JSON_FACTORY = JacksonFactory.getDefaultInstance();
+    private static final String TOKENS_DIRECTORY_PATH = "tokens";
 
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
-                    final String myPackageName = getPackageName();
-                    if (Telephony.Sms.getDefaultSmsPackage(this).equals(myPackageName)) {
+    /**
+     * Global instance of the scopes required by this quickstart.
+     * If modifying these scopes, delete your previously saved tokens/ folder.
+     */
+    private static final List<String> SCOPES = Collections.singletonList(GmailScopes.GMAIL_LABELS);
+    private static final String CREDENTIALS_FILE_PATH = "google.json";
 
-                        List<Sms> lst = getAllSms();
-                    }
-                }
+    /**
+     * Creates an authorized Credential object.
+     * @param HTTP_TRANSPORT The network HTTP Transport.
+     * @return An authorized Credential object.
+     * @throws IOException If the credentials.json file cannot be found.
+     */
+    private Credential getCredentials(final NetHttpTransport HTTP_TRANSPORT) throws IOException {
+        // Load client secrets.
+//        InputStream in = MainActivity.class.getResourceAsStream(CREDENTIALS_FILE_PATH);
+        InputStream in = getResources().openRawResource(R.raw.google);
+        GoogleClientSecrets clientSecrets = GoogleClientSecrets.load(JSON_FACTORY, new InputStreamReader(in));
+
+        // Build flow and trigger user authorization request.
+        GoogleAuthorizationCodeFlow flow = new GoogleAuthorizationCodeFlow.Builder(
+                HTTP_TRANSPORT, JSON_FACTORY, clientSecrets, SCOPES)
+                .setDataStoreFactory(new FileDataStoreFactory(new java.io.File(TOKENS_DIRECTORY_PATH)))
+                .setAccessType("offline")
+                .build();
+        LocalServerReceiver receiver = new LocalServerReceiver.Builder().setPort(8888).build();
+        return new AuthorizationCodeInstalledApp(flow, receiver).authorize("n300.itri@gmail.com");
+    }
+
+    private String getGmail2() throws IOException, GeneralSecurityException {
+        // Build a new authorized API client service.
+//        final NetHttpTransport HTTP_TRANSPORT = GoogleNetHttpTransport.newTrustedTransport();
+        final NetHttpTransport HTTP_TRANSPORT = new com.google.api.client.http.javanet.NetHttpTransport();
+        Gmail service = new Gmail.Builder(HTTP_TRANSPORT, JSON_FACTORY, getCredentials(HTTP_TRANSPORT))
+                .setApplicationName(APPLICATION_NAME)
+                .build();
+
+        // Print the labels in the user's account.
+        StringBuilder sb = new StringBuilder();
+        String user = "me";
+        ListLabelsResponse listResponse = service.users().labels().list(user).execute();
+        List<Label> labels = listResponse.getLabels();
+        if (labels.isEmpty()) {
+            sb.append("No labels found.");
+        } else {
+            sb.append("Labels:");
+            for (Label label : labels) {
+                sb.append(String.format("- %s\n", label.getName()));
             }
         }
+
+        return sb.toString();
+    }
+
+    private String getGmail() throws IOException {
+        credential = GoogleAccountCredential.usingOAuth2(this, Collections.singleton(TasksScopes.TASKS));
+        SharedPreferences settings = getPreferences(Context.MODE_PRIVATE);
+        credential.setSelectedAccountName(settings.getString(PREF_ACCOUNT_NAME, null));
+        if (credential.getSelectedAccountName() == null) {
+            chooseAccount();
+        }
+
+        HttpTransport httpTransport = new com.google.api.client.http.javanet.NetHttpTransport();
+        JsonFactory jsonFactory = JacksonFactory.getDefaultInstance();
+//        service = new com.google.api.services.tasks.Tasks.Builder(httpTransport, jsonFactory, credential)
+//                .setApplicationName(getApplicationName()).build();
+        gmail = new Gmail.Builder(httpTransport, jsonFactory, credential)
+                .setApplicationName(getApplicationName()).build();
+
+        final StringBuilder sb =  new StringBuilder();
+        String user = "me";
+        try {
+            Gmail.Users.Labels labels = gmail.users().labels();
+            final Gmail.Users.Labels.List list = labels.list(user);
+            AsyncTask<Void, Void, String> task = new AsyncTask<Void, Void, String>() {
+
+                ListLabelsResponse listResponse;
+
+                @Override
+                protected String doInBackground(Void... voids) {
+                    log.setText("loading...");
+                    try {
+                        listResponse = list.execute();
+                    } catch (IOException e) {
+                        return e.toString();
+                    }
+                    return null;
+                }
+
+                @Override
+                protected void onPostExecute(String token) {
+                    if (listResponse == null) {
+                        log.setText(token);
+                        return;
+                    }
+                    List<Label> labels = listResponse.getLabels();
+                    if (labels.isEmpty()) {
+                        sb.append("No labels found.");
+                    } else {
+                        sb.append("Labels:");
+                        for (Label label : labels) {
+                            sb.append(String.format("- %s\n", label.getName()));
+                        }
+                    }
+                }
+
+            };
+            task.execute();
+        } catch (Exception e) {
+            sb.append(e.toString());
+        }
+//        ListLabelsResponse listResponse = gmail.users().labels().list(user).execute();
+//        List<Label> labels = listResponse.getLabels();
+//        if (labels.isEmpty()) {
+//            sb.append("No labels found.");
+//        } else {
+//            sb.append("Labels:");
+//            for (Label label : labels) {
+//                sb.append(String.format("- %s\n", label.getName()));
+//            }
+//        }
+
+        return sb.toString();
+    }
+
+    private void chooseAccount() {
+        startActivityForResult(credential.newChooseAccountIntent(), REQUEST_ACCOUNT_PICKER);
+    }
+
+    private String getApplicationName() {
+        String name = BuildConfig.APPLICATION_ID;
+        try {
+            PackageInfo pInfo = getPackageManager().getPackageInfo(getPackageName(), 0);
+            String version = pInfo.versionName;
+            name += "/" + version;
+        } catch (PackageManager.NameNotFoundException e) {
+            e.printStackTrace();
+        }
+
+        return name;
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+//        if (requestCode == 1) {
+//            if (resultCode == RESULT_OK) {
+//
+//                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+//                    final String myPackageName = getPackageName();
+//                    if (Telephony.Sms.getDefaultSmsPackage(this).equals(myPackageName)) {
+//
+//                        List<Sms> lst = getAllSms();
+//                    }
+//                }
+//            }
+//        }
         super.onActivityResult(requestCode, resultCode, data);
         switch (requestCode) {
-            case REQUEST_GOOGLE_PLAY_SERVICES:
-                if (resultCode == Activity.RESULT_OK) {
-                    haveGooglePlayServices();
-                } else {
-                    checkGooglePlayServicesAvailable();
-                }
-                break;
-            case REQUEST_AUTHORIZATION:
-                if (resultCode == Activity.RESULT_OK) {
-                    AsyncLoadTasks.run(this);
-                } else {
-                    chooseAccount();
-                }
-                break;
+//            case REQUEST_GOOGLE_PLAY_SERVICES:
+//                if (resultCode == Activity.RESULT_OK) {
+//                    haveGooglePlayServices();
+//                } else {
+//                    checkGooglePlayServicesAvailable();
+//                }
+//                break;
+//            case REQUEST_AUTHORIZATION:
+//                if (resultCode == Activity.RESULT_OK) {
+//                    AsyncLoadTasks.run(this);
+//                } else {
+//                    chooseAccount();
+//                }
+//                break;
             case REQUEST_ACCOUNT_PICKER:
                 if (resultCode == Activity.RESULT_OK && data != null && data.getExtras() != null) {
                     String accountName = data.getExtras().getString(AccountManager.KEY_ACCOUNT_NAME);
@@ -365,16 +524,12 @@ public class MainActivity extends Activity {
                         SharedPreferences.Editor editor = settings.edit();
                         editor.putString(PREF_ACCOUNT_NAME, accountName);
                         editor.commit();
-                        AsyncLoadTasks.run(this);
+                        //AsyncLoadTask.run(this);
+                        //new GetAuthTokenCallback().run(null);
                     }
                 }
                 break;
         }
-
-    }
-
-    private void chooseAccount() {
-        startActivityForResult(credential.newChooseAccountIntent(), REQUEST_ACCOUNT_PICKER);
     }
 
     public List<Sms> getAllSms() {
@@ -405,4 +560,94 @@ public class MainActivity extends Activity {
 
         return lstSms;
     }
+
+    private class GetAuthTokenCallback implements AccountManagerCallback<Bundle> {
+
+        Activity context = MainActivity.this;
+
+        @Override
+        public void run(AccountManagerFuture<Bundle> accountManagerFuture) {
+            Bundle bundle;
+            try {
+                bundle = accountManagerFuture.getResult();
+                Intent intent = (Intent)bundle.get(AccountManager.KEY_INTENT);
+                if(intent != null) {
+                    // User input required
+                    context.startActivity(intent);
+                } else {
+                    AccountManager.get(context).invalidateAuthToken(bundle.getString(AccountManager.KEY_ACCOUNT_TYPE), bundle.getString(AccountManager.KEY_AUTHTOKEN));
+                    AccountManager.get(context).invalidateAuthToken("ah", bundle.getString(AccountManager.KEY_AUTHTOKEN));
+                    onGetAuthToken(bundle);
+                }
+            } catch (AuthenticatorException e) {
+                e.printStackTrace();
+            } catch (IOException e) {
+                e.printStackTrace();
+            } catch (OperationCanceledException e) {
+                e.printStackTrace();
+            }
+        }
+
+        protected void onGetAuthToken(Bundle bundle) {
+            String auth_token = bundle.getString(AccountManager.KEY_AUTHTOKEN);
+            new GetCookieTask().execute(auth_token);
+        }
+
+        private class GetCookieTask extends AsyncTask<String, Void, Boolean> {
+            protected Boolean doInBackground(String... tokens) {
+
+                return false;
+            }
+
+            protected void onPostExecute(Boolean result) {
+
+                Thread myThread = new Thread(new Runnable(){
+                    @Override
+                    public void run() {
+
+                    }
+                });
+                myThread.start();
+
+            }
+        }
+
+    }
 }
+
+class AsyncLoadTask extends AsyncTask<Void, Void, Boolean> {
+
+    MainActivity activity;
+    com.google.api.services.tasks.Tasks client;
+
+    AsyncLoadTask(MainActivity activity) {
+        this.activity = activity;
+    }
+
+    @Override
+    protected Boolean doInBackground(Void... voids) {
+        List<String> result = new ArrayList<String>();
+        List<Task> tasks =
+                null;
+        try {
+            tasks = client.tasks().list("@default").setFields("items/title").execute().getItems();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        if (tasks != null) {
+            for (Task task : tasks) {
+                result.add(task.getTitle());
+            }
+        } else {
+            result.add("No tasks.");
+        }
+
+        return null;
+    }
+
+    static void run(MainActivity activity) {
+        new AsyncLoadTask(activity).execute();
+    }
+}
+
+

@@ -1,0 +1,55 @@
+{
+  "project_info": {
+    "project_number": "364861553634",
+    "firebase_url": "https://studied-theater-232407.firebaseio.com",
+    "project_id": "studied-theater-232407",
+    "storage_bucket": "studied-theater-232407.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:364861553634:android:c6ce1dc79811892a",
+        "android_client_info": {
+          "package_name": "itir.n300.privatequity"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "364861553634-911chdn0imebems3tb6t0ct7glgc63dt.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "itir.n300.privatequity",
+            "certificate_hash": "bd75a4131450bddb203952f2aedc81501442daf2"
+          }
+        },
+        {
+          "client_id": "364861553634-gnm613gurulndsl4qke17mt53ki5t7uv.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBCcz88fTm7n-KaBz4YDqVTZYg1pW0SSmQ"
+        }
+      ],
+      "services": {
+        "analytics_service": {
+          "status": 1
+        },
+        "appinvite_service": {
+          "status": 2,
+          "other_platform_oauth_client": [
+            {
+              "client_id": "364861553634-gnm613gurulndsl4qke17mt53ki5t7uv.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        },
+        "ads_service": {
+          "status": 2
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

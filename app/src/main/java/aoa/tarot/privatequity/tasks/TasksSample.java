@@ -34,7 +34,7 @@ import aoa.tarot.privatequity.R;
  *
  * @author Yaniv Inbar
  */
-public final class TasksSample extends Activity {
+public class TasksSample extends Activity {
     /**
      * Logging level for HTTP requests/responses.
      *
